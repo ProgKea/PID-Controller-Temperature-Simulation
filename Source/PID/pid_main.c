@@ -27,6 +27,7 @@ typedef double f64;
 
 
 #include <raylib.h>
+#include <raymath.h>
 
 // NOTE: All temperature values are in °C
 
@@ -70,6 +71,7 @@ typedef struct {
 
   i32 window_width;
   i32 window_height;
+  Vector2 mouse_position;
 } PID_State;
 
 pthread_mutex_t simulation_mutex;
@@ -145,6 +147,7 @@ simulation_main(void *argument)
       PID_Sample sample = {
         .temperature = state.temperature,
         .time = state.time,
+        .P = P, .I = I, .D = D,
       };
       add_sample(&state.samples, sample);
 
@@ -181,8 +184,7 @@ pid_plot(Rectangle rectangle)
   {
     assert(step < 1000);
     i32 y = rectangle.height - (rectangle.height/steps*step) + rectangle.y;
-    char buffer[4];
-    sprintf(buffer, "%d", step*10);
+    const char *text = TextFormat("%d", step*10);
 
     i32 y_centered_and_clamped = y-FONT_SIZE/2;
     if (y_centered_and_clamped < rectangle.y)
@@ -194,8 +196,8 @@ pid_plot(Rectangle rectangle)
       y_centered_and_clamped = y-FONT_SIZE;
     }
 
-    DrawText(buffer, rectangle.x, y_centered_and_clamped, FONT_SIZE, WHITE);
-    temperature_line_x = MAX((f32) MeasureText(buffer, FONT_SIZE), temperature_line_x);
+    DrawText(text, rectangle.x, y_centered_and_clamped, FONT_SIZE, WHITE);
+    temperature_line_x = MAX((f32) MeasureText(text, FONT_SIZE), temperature_line_x);
   }
 
   f32 x_start = temperature_line_x + 2.0f + rectangle.x;
@@ -213,27 +215,48 @@ pid_plot(Rectangle rectangle)
 
   // samples -> points
   static Vector2 sample_points[SIMULATION_SAMPLE_CAPACITY];
+  const f32 radius = 5.0f;
   for (i32 i = 0; i < sample_count; ++i)
   {
+    PID_Sample sample = samples[i];
     Vector2 *sample_point = sample_points + i;
-    sample_point->x = samples[i].time + x_start - offset;
+    sample_point->x = sample.time + x_start - offset;
     sample_point->y = y_from_temperature(rectangle.height, samples[i].temperature) + rectangle.y;
-    DrawCircleV(*sample_point, 4.0f, RED);
+    DrawCircleV(*sample_point, radius, RED);
   }
   DrawSplineLinear(sample_points, sample_count, 2.0f, RED);
 
   if (sample_count > 0)
   {
-    char buffer[10];
     i32 i = sample_count-1;
-    sprintf(buffer, "%.02f", samples[i].temperature);
-
-    i32 width = MeasureText(buffer, FONT_SIZE);
-
+    const char *text = TextFormat("%.02f", samples[i].temperature);
+    i32 width = MeasureText(text, FONT_SIZE);
     Vector2 position = sample_points[i];
     position.x -= width/2;
     position.y -= FONT_SIZE;
-    DrawText(buffer, position.x, position.y, FONT_SIZE, WHITE);
+    DrawText(text, position.x, position.y, FONT_SIZE, WHITE);
+  }
+
+  for (i32 i = 0; i < sample_count; ++i)
+  {
+    Vector2 *sample_point = sample_points + i;
+
+    PID_Sample sample = samples[i];
+    if (CheckCollisionPointCircle(state.mouse_position, *sample_point, radius))
+    {
+      const char *text = TextFormat("Temperature = %.02f °C\nTime = %.02f\nP = %.02f, I = %.02f, D = %.02f", sample.temperature, sample.time, sample.P, sample.I, sample.D);
+
+      const f32 padding = 2.0f;
+      Vector2 box_size = {
+        .x = MeasureText(text, FONT_SIZE) + padding*2,
+        .y = 3*FONT_SIZE + padding*2,
+      };
+
+      Vector2 position = *sample_point;
+      position.y -= box_size.y;
+      DrawRectangleV(position, box_size, ColorAlpha(DARKGRAY, 0.8));
+      DrawText(text, position.x + padding, position.y + padding, FONT_SIZE, WHITE);
+    }
   }
 
   EndScissorMode();
@@ -271,6 +294,8 @@ main(void)
       state.window_height = GetScreenHeight();
     }
 
+    state.mouse_position = GetMousePosition();
+
     BeginDrawing();
     ClearBackground(GetColor(0x181818FF));
 
@@ -290,10 +315,9 @@ main(void)
       pthread_mutex_unlock(&simulation_mutex);
     }
 
-    Vector2 mouse = GetMousePosition();
-    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && CheckCollisionPointRec(mouse, plot_rectangle))
+    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && CheckCollisionPointRec(state.mouse_position, plot_rectangle))
     {
-      f32 temperature = SIMULATION_MAX_TEMPERATURE * ((plot_rectangle.height - (mouse.y - plot_rectangle.y)) / plot_rectangle.height);
+      f32 temperature = SIMULATION_MAX_TEMPERATURE * ((plot_rectangle.height - (state.mouse_position.y - plot_rectangle.y)) / plot_rectangle.height);
       pthread_mutex_lock(&simulation_mutex);
       state.target_temperature = temperature;
       pthread_mutex_unlock(&simulation_mutex);
@@ -301,6 +325,7 @@ main(void)
 
     EndDrawing();
   }
+
   CloseWindow();
   pthread_mutex_destroy(&simulation_mutex);
 
