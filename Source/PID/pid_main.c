@@ -75,7 +75,7 @@ typedef struct {
 pthread_mutex_t simulation_mutex;
 pthread_t simulation_thread;
 
-volatile static PID_State state = {0};
+static volatile PID_State state = {0};
 
 static void
 add_sample(volatile PID_Sample_Ring_Buffer *ring_buffer, PID_Sample item)
